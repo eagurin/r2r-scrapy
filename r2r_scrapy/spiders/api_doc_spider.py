@@ -155,6 +155,15 @@ class ApiDocSpider(CrawlSpider):
                 for link in links:
                     yield response.follow(link, callback=self.parse)
 
+    def parse(self, response: Response) -> Iterator:
+        """
+        Базовый метод для обработки страниц
+        
+        Этот метод вызывается Scrapy по умолчанию и перенаправляет обработку
+        на метод parse_documentation
+        """
+        return self.parse_documentation(response)
+
     def parse_documentation(self, response: Response) -> Iterator:
         """
         Обработка документации API
@@ -187,10 +196,17 @@ class ApiDocSpider(CrawlSpider):
         ).get() or self._extract_title_from_url(response.url)
 
         # Обработка HTML-содержимого
-        content = self.html_processor.process(response.text)
+        processed_result = self.html_processor.process(response.text)
+        # Метод process возвращает кортеж (content, metadata)
+        if isinstance(processed_result, tuple) and len(processed_result) >= 1:
+            content = processed_result[0]
+            page_metadata = processed_result[1] if len(processed_result) > 1 else {}
+        else:
+            content = processed_result
+            page_metadata = {}
 
         # Если содержимое пустое, логируем и пропускаем
-        if not content.strip():
+        if not content or not isinstance(content, str) or not content.strip():
             self._custom_logger.warning(
                 f"Empty content after processing for URL: {response.url}"
             )
@@ -210,6 +226,7 @@ class ApiDocSpider(CrawlSpider):
                 "description": self._extract_description(response),
                 "keywords": self._extract_keywords(response),
                 "language": self._detect_language(content),
+                **page_metadata  # Добавляем метаданные, полученные из HTML-процессора
             },
         }
 
@@ -248,7 +265,7 @@ class ApiDocSpider(CrawlSpider):
         if isinstance(value, bytes):
             try:
                 return value.decode("utf-8", errors="ignore")
-            except:
+            except Exception:
                 return str(value)
 
         # Для списков берем первый элемент, если он есть
